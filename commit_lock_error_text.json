@@ -1,0 +1,4 @@
+{
+    "message": "A commit lock was detected on Panorama. This means another administrator or process was making changes when the cert automation ran. Please clear any locks in Panorama, log into the certautomation host and manually re-run the script, using the following command: sudo RENEWED_LINEAGE=/etc/letsencrypt/live/<name of the cert that failed in here> /etc/letsencrypt/renewal-hooks/deploy/run_deploy_hook.sh."
+}
+

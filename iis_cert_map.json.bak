@@ -1,0 +1,130 @@
+{
+  "_defaults_": {
+    "username": "certautomation",
+    "ssh_key_path": "/home/certautomation/.ssh/id_rsa"
+  },
+  "maps.westernbay.govt.nz": [
+    {
+      "server": "10.80.250.213",
+      "website_name": "Default Web Site",
+      "ip_address": "10.80.250.213"
+    },
+    {
+      "server": "10.80.4.216",
+      "website_name": "Default Web Site",
+      "ip_address": "10.80.4.216"
+    }
+  ],
+  "secure.westernbay.govt.nz": [
+    {
+      "server": "10.80.253.9",
+      "website_name": "secure",
+      "ip_address": "10.80.253.9"
+    }
+  ],
+  "haveyoursay.westernbay.govt.nz": [
+    {
+      "server": "10.80.253.9",
+      "website_name": "haveyoursay",
+      "ip_address": "10.80.253.8"
+    }
+  ],
+  "hybrid.westernbay.govt.nz": [
+    {
+      "server": "10.80.4.168",
+      "website_name": "Default Web Site",
+      "ip_address": "10.80.4.168",
+      "host_header": "",
+      "crypto_provider": "legacy"
+    },
+    {
+      "server": "10.80.4.168",
+      "website_name": "Default Web Site",
+      "ip_address": "127.0.0.1",
+      "host_header": "localhost",
+      "crypto_provider": "legacy"
+    }
+  ],
+  "media.westernbay.govt.nz": [
+    {
+      "server": "10.80.250.111",
+      "website_name": "Media",
+      "ip_address": "10.80.250.111"
+    }
+  ],
+  "map.westernbay.govt.nz": [
+    {
+      "server": "10.80.250.215",
+      "website_name": "Default Web Site",
+      "host_header": "map.westernbay.govt.nz",
+      "ip_address": "10.80.250.215"
+    },
+    {
+      "server": "10.80.250.215",
+      "website_name": "Default Web Site",
+      "host_header": "map.wbopdc.govt.nz",
+      "ip_address": "10.80.250.216"
+    },
+    {
+      "server": "10.80.250.215",
+      "website_name": "Maintenance",
+      "ip_address": "10.80.250.215"
+    },
+    {
+      "server": "10.80.4.95",
+      "website_name": "Default Web Site",
+      "ip_address": "10.80.4.95"
+    }
+  ], 
+   "wbutwhis01.utilities.wbopdc.nz": [
+    {
+      "server": "10.82.246.9",
+      "website_name": "AlarmManager.WebApp",
+      "host_header": "",
+      "ip_address": "10.82.246.9"
+    }
+  ], 
+    "citrix.westernbay.govt.nz": [
+    {
+      "server": "10.80.4.60",
+      "website_name": "Default Web Site",
+      "host_header": "",
+      "ip_address": "*"
+    },
+      {
+      "server": "10.80.4.158",
+      "website_name": "Default Web Site",
+      "host_header": "",
+      "ip_address": "*"
+    }
+  ],
+  "api.westernbay.govt.nz": [
+    {
+      "server": "10.80.253.88",
+      "website_name": "Default",
+      "ip_address": "10.80.253.88"
+    },
+    {
+      "server": "10.80.253.88",
+      "website_name": "ObjectiveWebtalk",
+      "ip_address": "10.80.253.88",
+      "port_number": "9445"
+    },
+    {
+      "server": "10.80.253.88",
+      "website_name": "ObjectiveWebtalkPlus",
+      "ip_address": "10.80.253.88",
+      "port_number": "8743"
+    }
+  ],
+  "app.mydomain.com": [
+    {
+      "server": "app-server-01",
+      "website_name": "App Web Site",
+      "ip_address": "10.80.250.230",
+      "username": "appadmin",
+      "ssh_key_path": "/home/appadmin/.ssh/id_rsa"
+    }
+  ]
+}
+

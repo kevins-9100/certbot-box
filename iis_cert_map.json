@@ -1,0 +1,14 @@
+{
+  "_defaults_": {
+    "username": "certbot",
+    "ssh_key_path": "/home/certbot/.ssh/id_rsa"
+  },
+  "bolbolanon.help": [
+    {
+      "server": "192.168.100.250",
+      "website_name": "Default Web Site",
+      "ip_address": "192.168.100.250"
+    }
+  ]
+}
+

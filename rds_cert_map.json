@@ -1,0 +1,19 @@
+{
+    "_defaults_": {
+        "username": "certautomation",
+        "ssh_key_path": "/home/certautomation/.ssh/id_rsa"
+    },
+    
+    "rdsfarm.utilities.wbopdc.nz": [
+        {
+            "id": " rds_production_farm",
+            "server": "10.82.246.1",
+            "roles": [
+                "RDGateway",
+                "RDWebAccess",
+                "RDRedirector",
+                "RDPublishing"
+            ]
+        }
+    ]
+}
