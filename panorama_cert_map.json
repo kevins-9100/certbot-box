@@ -10,6 +10,17 @@
             "panorama_name": "global.bolbolanon.help",
             "target_dg": "",
             "target_tpl": ""
+        },
+        "home.bolbolanon.help": {
+            "panorama_name": "home.bolbolanon.help",
+            "target_dg": "TGA-HOME-template",
+            "target_tpl": "TGA-HOME-template"
+        },
+	"panorama.bolbolanon.help": {
+            "panorama_name": "panorama.bolbolanon.help",
+            "target_dg": "",
+            "target_tpl": ""
         }
+
     }
 }
