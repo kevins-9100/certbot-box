@@ -2,6 +2,7 @@
 
 import os
 import json
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from flask import Flask, request, redirect, url_for, flash, get_flashed_messages
@@ -488,9 +489,14 @@ def register():
         if not domain:
             flash("Domain is required.", "error")
         elif action == "register-acme":
-            cmd = ["acme-dns-client", "register", "-d", domain, "-s", acme_server]
+            binary = shutil.which("acme-dns-client") or "/usr/local/bin/acme-dns-client"
+            cmd = [binary, "register", "-d", domain, "-s", acme_server]
+            env_vars = os.environ.copy()
+            env_vars["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=60, env=env_vars,
+                )
                 output = result.stdout
                 if result.stderr:
                     output += "\n" + result.stderr
@@ -498,6 +504,9 @@ def register():
                     flash(f"{domain} registered with ACME DNS. Add the CNAME before issuing.", "success")
                 else:
                     flash(f"acme-dns-client exited with code {result.returncode}.", "error")
+            except subprocess.TimeoutExpired:
+                output = f"Error: acme-dns-client timed out. Check that the ACME DNS server is reachable at {acme_server}."
+                flash("acme-dns-client timed out.", "error")
             except Exception as e:
                 output = f"Error: {e}"
                 flash("Failed to run acme-dns-client.", "error")
