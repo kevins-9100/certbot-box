@@ -199,13 +199,51 @@ _DASHBOARD = """{% extends 'base.html' %}
 _REGISTER = """{% extends 'base.html' %}
 {% block content %}
 <h2>Register New Certificate</h2>
+
 <div class="card">
-  <form method="POST" onsubmit="this.querySelector('button[type=submit]').textContent='Registering…';this.querySelector('button[type=submit]').disabled=true">
+  <h3>Step 1 &mdash; Register Domain with ACME DNS</h3>
+  <p class="hint" style="margin-bottom:1rem">
+    Creates a CNAME record in the acme-dns server. You must add the resulting CNAME to your
+    public DNS before issuing the certificate.
+  </p>
+  <form method="POST" onsubmit="lock(this,'Registering…')">
+    <input type="hidden" name="action" value="register-acme">
     <div class="row">
       <div class="field">
         <label>Domain</label>
         <input type="text" name="domain" placeholder="example.com" required value="{{ domain or '' }}" class="wide">
-        <p class="hint">Uses acme-dns-client for DNS-01 challenge</p>
+      </div>
+      <div class="field">
+        <label>ACME DNS Server</label>
+        <input type="text" name="acme_server" value="{{ acme_server or 'http://localhost:8080' }}" class="wide">
+      </div>
+      <div class="field" style="justify-content:flex-end">
+        <button type="submit" class="btn-s">Register with ACME DNS</button>
+      </div>
+    </div>
+  </form>
+  {% if action == 'register-acme' and output is not none %}
+  <hr>
+  <h3>Output</h3>
+  <div class="output">{{ output }}</div>
+  <p class="hint" style="margin-top:.75rem;color:#facc15">
+    &#9888; Add the CNAME record shown above to your DNS provider, then proceed to Step 2.
+  </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>Step 2 &mdash; Issue Certificate</h3>
+  <p class="hint" style="margin-bottom:1rem">
+    Runs certbot with acme-dns-client as the DNS-01 auth hook. Complete Step 1 and
+    add the CNAME first.
+  </p>
+  <form method="POST" onsubmit="lock(this,'Issuing…')">
+    <input type="hidden" name="action" value="issue-cert">
+    <div class="row">
+      <div class="field">
+        <label>Domain</label>
+        <input type="text" name="domain" placeholder="example.com" required value="{{ domain or '' }}" class="wide">
       </div>
       <div class="field">
         <label>Environment</label>
@@ -215,17 +253,25 @@ _REGISTER = """{% extends 'base.html' %}
         </select>
       </div>
       <div class="field" style="justify-content:flex-end">
-        <button type="submit" class="btn">Register Certificate</button>
+        <button type="submit" class="btn">Issue Certificate</button>
         <p class="hint">May take up to 2 minutes</p>
       </div>
     </div>
   </form>
-  {% if output is not none %}
+  {% if action == 'issue-cert' and output is not none %}
   <hr>
   <h3>Certbot Output</h3>
   <div class="output">{{ output }}</div>
   {% endif %}
 </div>
+
+<script>
+function lock(form, label) {
+  var btn = form.querySelector('button[type=submit]');
+  btn.textContent = label;
+  btn.disabled = true;
+}
+</script>
 {% endblock %}"""
 
 _IIS = """{% extends 'base.html' %}
@@ -430,14 +476,32 @@ def register():
     output = None
     domain = None
     env = "production"
+    action = None
+    acme_server = "http://localhost:8080"
 
     if request.method == "POST":
+        action = request.form.get("action", "issue-cert")
         domain = request.form.get("domain", "").strip()
         env = request.form.get("env", "production")
+        acme_server = request.form.get("acme_server", "http://localhost:8080").strip()
 
         if not domain:
             flash("Domain is required.", "error")
-        else:
+        elif action == "register-acme":
+            cmd = ["acme-dns-client", "register", "-d", domain, "-s", acme_server]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                output = result.stdout
+                if result.stderr:
+                    output += "\n" + result.stderr
+                if result.returncode == 0:
+                    flash(f"{domain} registered with ACME DNS. Add the CNAME before issuing.", "success")
+                else:
+                    flash(f"acme-dns-client exited with code {result.returncode}.", "error")
+            except Exception as e:
+                output = f"Error: {e}"
+                flash("Failed to run acme-dns-client.", "error")
+        elif action == "issue-cert":
             cmd = [
                 "certbot", "certonly",
                 "--non-interactive", "--agree-tos",
@@ -450,14 +514,13 @@ def register():
             ]
             if env == "staging":
                 cmd += ["--server", ACME_STAGING]
-
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
                 output = result.stdout
                 if result.stderr:
                     output += "\n" + result.stderr
                 if result.returncode == 0:
-                    flash(f"Certificate for {domain} registered successfully.", "success")
+                    flash(f"Certificate for {domain} issued successfully.", "success")
                 else:
                     flash(f"Certbot exited with code {result.returncode}.", "error")
             except subprocess.TimeoutExpired:
@@ -468,7 +531,7 @@ def register():
                 flash("Failed to run certbot.", "error")
 
     return render("register.html", "register", "Register Certificate",
-        output=output, domain=domain, env=env)
+        output=output, domain=domain, env=env, action=action, acme_server=acme_server)
 
 # ── routes — IIS mappings ─────────────────────────────────────────────────────
 
