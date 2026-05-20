@@ -4,6 +4,8 @@ import os
 import json
 import shutil
 import subprocess
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from flask import Flask, request, redirect, url_for, flash, get_flashed_messages
 from jinja2 import Environment, DictLoader
@@ -14,6 +16,7 @@ from OpenSSL import crypto
 LIVE_DIR = "/etc/letsencrypt/live"
 IIS_MAP_FILE = "/etc/letsencrypt/iis_cert_map.json"
 PANORAMA_MAP_FILE = "/etc/letsencrypt/panorama_cert_map.json"
+ACMEDNS_CREDENTIALS_FILE = "/etc/letsencrypt/acmedns.json"
 EMAIL_CONFIG_FILE = "/etc/letsencrypt/emailserver.json"
 RENEW_BEFORE_EXPIRY_DAYS = 30
 PORT = 5000
@@ -72,6 +75,33 @@ def get_cert_info():
         except Exception as e:
             certs.append({"name": cert_name, "error": str(e), "status": "error"})
     return certs
+
+def acmedns_register(domain, acme_server):
+    """Call the acme-dns /register API directly and save credentials to acmedns.json."""
+    url = acme_server.rstrip("/") + "/register"
+    req = urllib.request.Request(url, data=b"", method="POST")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode())
+
+    creds = {}
+    try:
+        with open(ACMEDNS_CREDENTIALS_FILE) as f:
+            creds = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    creds[domain] = {
+        "username": data["username"],
+        "password": data["password"],
+        "fulldomain": data["fulldomain"],
+        "subdomain": data["subdomain"],
+        "allowfrom": data.get("allowfrom", []),
+    }
+    with open(ACMEDNS_CREDENTIALS_FILE, "w") as f:
+        json.dump(creds, f, indent=2)
+
+    return data
 
 # ── templates ─────────────────────────────────────────────────────────────────
 
@@ -489,27 +519,24 @@ def register():
         if not domain:
             flash("Domain is required.", "error")
         elif action == "register-acme":
-            binary = shutil.which("acme-dns-client") or "/usr/local/bin/acme-dns-client"
-            cmd = [binary, "register", "-d", domain, "-s", acme_server]
-            env_vars = os.environ.copy()
-            env_vars["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             try:
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=60, env=env_vars,
+                reg = acmedns_register(domain, acme_server)
+                cname_target = reg["fulldomain"]
+                output = (
+                    f"Registration successful!\n\n"
+                    f"Add this CNAME record to your public DNS zone:\n\n"
+                    f"  _acme-challenge.{domain}  →  {cname_target}.\n\n"
+                    f"Subdomain : {cname_target}\n"
+                    f"Username  : {reg['username']}\n"
+                    f"Credentials saved to: {ACMEDNS_CREDENTIALS_FILE}\n"
                 )
-                output = result.stdout
-                if result.stderr:
-                    output += "\n" + result.stderr
-                if result.returncode == 0:
-                    flash(f"{domain} registered with ACME DNS. Add the CNAME before issuing.", "success")
-                else:
-                    flash(f"acme-dns-client exited with code {result.returncode}.", "error")
-            except subprocess.TimeoutExpired:
-                output = f"Error: acme-dns-client timed out. Check that the ACME DNS server is reachable at {acme_server}."
-                flash("acme-dns-client timed out.", "error")
+                flash(f"{domain} registered. Add the CNAME record, then proceed to Step 2.", "success")
+            except urllib.error.URLError as e:
+                output = f"Error connecting to acme-dns at {acme_server}:\n{e.reason}"
+                flash("Could not reach the acme-dns server.", "error")
             except Exception as e:
                 output = f"Error: {e}"
-                flash("Failed to run acme-dns-client.", "error")
+                flash("Registration failed.", "error")
         elif action == "issue-cert":
             cmd = [
                 "certbot", "certonly",
