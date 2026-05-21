@@ -160,6 +160,7 @@ _BASE = """<!DOCTYPE html>
 </head>
 <body>
   <nav>
+    <img src="/logo.svg" height="26" alt="Theta" style="margin-right:.5rem;vertical-align:middle;display:inline-block">
     <span class="brand">Certbot</span>
     <a href="{{ url_for('dashboard') }}"{% if active=='dashboard' %} class="active"{% endif %}>Dashboard</a>
     <a href="{{ url_for('register') }}"{% if active=='register' %} class="active"{% endif %}>Register Cert</a>
@@ -482,79 +483,44 @@ _PANORAMA = """{% extends 'base.html' %}
 _ACMEDNS = """{% extends 'base.html' %}
 {% block content %}
 <h2>ACME DNS Accounts</h2>
+<p style="color:#94a3b8;font-size:.875rem;margin-bottom:1.5rem">
+  Stored in {{ storage_file }}. Deleting removes local storage only &mdash;
+  the acme-dns server record remains.
+</p>
 
-<div class="card">
-  <h3>Certbot Domain Reference</h3>
-  <p class="hint" style="margin-bottom:1rem">
-    Every domain used with certbot needs an ACME DNS account before a certificate
-    can be issued or renewed.
-  </p>
-  <table>
-    <thead>
-      <tr><th>Certbot Domain</th><th>ACME DNS Account</th><th>CNAME Target</th></tr>
-    </thead>
-    <tbody>
-      {% for cert in cert_domains %}
-      <tr>
-        <td class="mono">{{ cert }}</td>
-        {% if cert in accounts %}
-        <td><span class="badge ok">Registered</span></td>
-        <td class="mono" style="font-size:.8rem">{{ accounts[cert].fulldomain }}</td>
-        {% else %}
-        <td><span class="badge critical">Not registered</span></td>
-        <td style="color:#64748b;font-size:.8rem">&#8212; use Register Cert &rarr; Step 1</td>
-        {% endif %}
-      </tr>
-      {% else %}
-      <tr><td colspan="3" style="color:#64748b;text-align:center;padding:1rem">No certbot certs found</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-
-<div style="margin-bottom:.5rem">
-  <h3 style="font-size:.75rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em">
-    All ACME DNS Accounts
-  </h3>
-  <p class="hint" style="margin-top:.25rem;margin-bottom:1rem">
-    Stored in {{ storage_file }}. Deleting removes local storage only &mdash;
-    the acme-dns server record remains.
-  </p>
-</div>
-
-{% if accounts %}
 <table>
   <thead>
     <tr>
       <th>Domain</th>
-      <th>CNAME Target (fulldomain)</th>
-      <th>Username</th>
-      <th>Server</th>
+      <th>ACME DNS Status</th>
+      <th>CNAME Record to Add</th>
       <th></th>
     </tr>
   </thead>
   <tbody>
-    {% for domain, acct in accounts.items() %}
+    {% for row in merged %}
     <tr>
-      <td class="mono">{{ domain }}</td>
-      <td class="mono" style="font-size:.8rem">{{ acct.fulldomain }}</td>
-      <td class="mono" style="font-size:.8rem;color:#64748b">{{ acct.username }}</td>
-      <td class="mono" style="font-size:.8rem;color:#64748b">{{ acct.server_url }}</td>
+      <td class="mono">{{ row.domain }}</td>
+      {% if row.acct %}
+      <td><span class="badge ok">Registered</span></td>
+      <td class="mono" style="font-size:.8rem">_acme-challenge.{{ row.domain }}&nbsp;&rarr;&nbsp;{{ row.acct.fulldomain }}.</td>
       <td>
         <form method="POST" action="{{ url_for('acmedns_delete') }}" style="margin:0">
-          <input type="hidden" name="domain" value="{{ domain }}">
-          <button class="btn btn-d" onclick="return confirm('Remove {{ domain }} from local storage?')">Delete</button>
+          <input type="hidden" name="domain" value="{{ row.domain }}">
+          <button class="btn btn-d" onclick="return confirm('Remove {{ row.domain }} from local storage?')">Delete</button>
         </form>
       </td>
+      {% else %}
+      <td><span class="badge critical">Not registered</span></td>
+      <td style="color:#64748b;font-size:.8rem">&#8212; use Register Cert &rarr; Step 1</td>
+      <td></td>
+      {% endif %}
     </tr>
+    {% else %}
+    <tr><td colspan="4" style="text-align:center;color:#64748b;padding:2rem">No domains found</td></tr>
     {% endfor %}
   </tbody>
 </table>
-{% else %}
-<div class="card" style="color:#64748b;text-align:center;padding:2rem">
-  No accounts found in {{ storage_file }}
-</div>
-{% endif %}
 {% endblock %}"""
 
 # ── jinja2 environment ────────────────────────────────────────────────────────
@@ -802,9 +768,15 @@ def acmedns_page():
         d for d in os.listdir(LIVE_DIR)
         if os.path.isfile(os.path.join(LIVE_DIR, d, "cert.pem"))
     ) if os.path.isdir(LIVE_DIR) else []
+    # Union of certbot domains and ACME DNS accounts; acme-only entries disappear on delete
+    all_domains = sorted(set(cert_domains) | set(accounts.keys()))
+    merged = [
+        {"domain": d, "acct": accounts.get(d)}
+        for d in all_domains
+        if d in cert_domains or d in accounts
+    ]
     return render("acmedns.html", "acmedns", "ACME DNS Accounts",
-        accounts=accounts,
-        cert_domains=cert_domains,
+        merged=merged,
         storage_file=ACMEDNS_CREDENTIALS_FILE,
     )
 
@@ -823,6 +795,17 @@ def acmedns_delete():
     except Exception as e:
         flash(f"Error: {e}", "error")
     return redirect(url_for("acmedns_page"))
+
+
+# ── logo ──────────────────────────────────────────────────────────────────────
+
+@app.route("/logo.svg")
+def serve_logo():
+    svg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "thetalogo.svg")
+    if not os.path.isfile(svg_path):
+        return "", 404
+    with open(svg_path, "rb") as f:
+        return f.read(), 200, {"Content-Type": "image/svg+xml"}
 
 
 if __name__ == "__main__":

@@ -11,6 +11,9 @@ if [ "$(realpath "$SCRIPT_DIR/certdash.py")" != "$(realpath /etc/letsencrypt/cer
     cp "$SCRIPT_DIR/certdash.py" /etc/letsencrypt/certdash.py
 fi
 chmod 700 /etc/letsencrypt/certdash.py
+if [ "$(realpath "$SCRIPT_DIR/thetalogo.svg")" != "$(realpath /etc/letsencrypt/thetalogo.svg 2>/dev/null)" ]; then
+    cp "$SCRIPT_DIR/thetalogo.svg" /etc/letsencrypt/thetalogo.svg
+fi
 
 echo "==> Installing systemd service..."
 cp "$SCRIPT_DIR/certdash.service" /etc/systemd/system/certdash.service
