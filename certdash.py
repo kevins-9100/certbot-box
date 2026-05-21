@@ -165,6 +165,7 @@ _BASE = """<!DOCTYPE html>
     <a href="{{ url_for('register') }}"{% if active=='register' %} class="active"{% endif %}>Register Cert</a>
     <a href="{{ url_for('iis_page') }}"{% if active=='iis' %} class="active"{% endif %}>IIS Mappings</a>
     <a href="{{ url_for('panorama_page') }}"{% if active=='panorama' %} class="active"{% endif %}>Panorama Mappings</a>
+    <a href="{{ url_for('acmedns_page') }}"{% if active=='acmedns' %} class="active"{% endif %}>ACME DNS Accounts</a>
   </nav>
   <div class="page">
     {% for cat, msg in messages %}
@@ -478,6 +479,84 @@ _PANORAMA = """{% extends 'base.html' %}
 </div>
 {% endblock %}"""
 
+_ACMEDNS = """{% extends 'base.html' %}
+{% block content %}
+<h2>ACME DNS Accounts</h2>
+
+<div class="card">
+  <h3>Certbot Domain Reference</h3>
+  <p class="hint" style="margin-bottom:1rem">
+    Every domain used with certbot needs an ACME DNS account before a certificate
+    can be issued or renewed.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Certbot Domain</th><th>ACME DNS Account</th><th>CNAME Target</th></tr>
+    </thead>
+    <tbody>
+      {% for cert in cert_domains %}
+      <tr>
+        <td class="mono">{{ cert }}</td>
+        {% if cert in accounts %}
+        <td><span class="badge ok">Registered</span></td>
+        <td class="mono" style="font-size:.8rem">{{ accounts[cert].fulldomain }}</td>
+        {% else %}
+        <td><span class="badge critical">Not registered</span></td>
+        <td style="color:#64748b;font-size:.8rem">&#8212; use Register Cert &rarr; Step 1</td>
+        {% endif %}
+      </tr>
+      {% else %}
+      <tr><td colspan="3" style="color:#64748b;text-align:center;padding:1rem">No certbot certs found</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div style="margin-bottom:.5rem">
+  <h3 style="font-size:.75rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em">
+    All ACME DNS Accounts
+  </h3>
+  <p class="hint" style="margin-top:.25rem;margin-bottom:1rem">
+    Stored in {{ storage_file }}. Deleting removes local storage only &mdash;
+    the acme-dns server record remains.
+  </p>
+</div>
+
+{% if accounts %}
+<table>
+  <thead>
+    <tr>
+      <th>Domain</th>
+      <th>CNAME Target (fulldomain)</th>
+      <th>Username</th>
+      <th>Server</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for domain, acct in accounts.items() %}
+    <tr>
+      <td class="mono">{{ domain }}</td>
+      <td class="mono" style="font-size:.8rem">{{ acct.fulldomain }}</td>
+      <td class="mono" style="font-size:.8rem;color:#64748b">{{ acct.username }}</td>
+      <td class="mono" style="font-size:.8rem;color:#64748b">{{ acct.server_url }}</td>
+      <td>
+        <form method="POST" action="{{ url_for('acmedns_delete') }}" style="margin:0">
+          <input type="hidden" name="domain" value="{{ domain }}">
+          <button class="btn btn-d" onclick="return confirm('Remove {{ domain }} from local storage?')">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="card" style="color:#64748b;text-align:center;padding:2rem">
+  No accounts found in {{ storage_file }}
+</div>
+{% endif %}
+{% endblock %}"""
+
 # ── jinja2 environment ────────────────────────────────────────────────────────
 
 _jinja = Environment(
@@ -487,6 +566,7 @@ _jinja = Environment(
         "register.html": _REGISTER,
         "iis.html": _IIS,
         "panorama.html": _PANORAMA,
+        "acmedns.html": _ACMEDNS,
     }),
     autoescape=True,
 )
@@ -708,6 +788,41 @@ def panorama_delete():
     else:
         flash("Deployment not found.", "error")
     return redirect(url_for("panorama_page"))
+
+
+# ── routes — ACME DNS accounts ────────────────────────────────────────────────
+
+@app.route("/acmedns")
+def acmedns_page():
+    try:
+        accounts = load_json(ACMEDNS_CREDENTIALS_FILE)
+    except (FileNotFoundError, json.JSONDecodeError):
+        accounts = {}
+    cert_domains = sorted(
+        d for d in os.listdir(LIVE_DIR)
+        if os.path.isfile(os.path.join(LIVE_DIR, d, "cert.pem"))
+    ) if os.path.isdir(LIVE_DIR) else []
+    return render("acmedns.html", "acmedns", "ACME DNS Accounts",
+        accounts=accounts,
+        cert_domains=cert_domains,
+        storage_file=ACMEDNS_CREDENTIALS_FILE,
+    )
+
+
+@app.route("/acmedns/delete", methods=["POST"])
+def acmedns_delete():
+    domain = request.form.get("domain", "")
+    try:
+        data = load_json(ACMEDNS_CREDENTIALS_FILE)
+        if domain in data:
+            del data[domain]
+            save_json(ACMEDNS_CREDENTIALS_FILE, data)
+            flash(f"Removed {domain} from ACME DNS storage.", "success")
+        else:
+            flash(f"{domain} not found.", "error")
+    except Exception as e:
+        flash(f"Error: {e}", "error")
+    return redirect(url_for("acmedns_page"))
 
 
 if __name__ == "__main__":
