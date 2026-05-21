@@ -267,14 +267,19 @@ _REGISTER = """{% extends 'base.html' %}
   <h3>Step 2 &mdash; Issue Certificate</h3>
   <p class="hint" style="margin-bottom:1rem">
     Runs certbot with acme-dns-client as the DNS-01 auth hook. Complete Step 1 and
-    add the CNAME first.
+    add the CNAME record(s) first. Each SAN also needs its own CNAME.
   </p>
   <form method="POST" onsubmit="lock(this,'Issuing…')">
     <input type="hidden" name="action" value="issue-cert">
     <div class="row">
       <div class="field">
-        <label>Domain</label>
-        <input type="text" name="domain" placeholder="example.com" required value="{{ domain or '' }}" class="wide">
+        <label>Primary Domain</label>
+        <input type="text" name="domain" placeholder="sample.bolbolanon.help" required value="{{ domain or '' }}" class="wide">
+      </div>
+      <div class="field">
+        <label>Cert Name</label>
+        <input type="text" name="cert_name" placeholder="same as primary domain" value="{{ cert_name or '' }}" class="wide">
+        <p class="hint">Leave blank to use the primary domain</p>
       </div>
       <div class="field">
         <label>Environment</label>
@@ -283,6 +288,15 @@ _REGISTER = """{% extends 'base.html' %}
           <option value="staging"{% if env=='staging' %} selected{% endif %}>Staging (Test)</option>
         </select>
       </div>
+    </div>
+    <div class="row">
+      <div class="field" style="flex:1">
+        <label>Additional SANs (one per line)</label>
+        <textarea name="sans" rows="3" placeholder="www.sample.bolbolanon.help&#10;mail.sample.bolbolanon.help" style="background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:.5rem .75rem;border-radius:.375rem;font-size:.875rem;width:100%;resize:vertical">{{ sans or '' }}</textarea>
+        <p class="hint">Optional. Each SAN also needs its own CNAME registered in Step 1.</p>
+      </div>
+    </div>
+    <div class="row">
       <div class="field" style="justify-content:flex-end">
         <button type="submit" class="btn">Issue Certificate</button>
         <p class="hint">May take up to 2 minutes</p>
@@ -538,16 +552,24 @@ def register():
                 output = f"Error: {e}"
                 flash("Registration failed.", "error")
         elif action == "issue-cert":
+            cert_name = request.form.get("cert_name", "").strip() or domain
+            sans_raw = request.form.get("sans", "").strip()
+            sans = [s.strip() for s in sans_raw.splitlines() if s.strip()]
+
             cmd = [
                 "certbot", "certonly",
-                "--non-interactive", "--agree-tos",
-                "--email", get_sender_email(),
+                "--non-interactive",
                 "--manual",
                 "--preferred-challenges", "dns",
+                "--key-type", "rsa",
+                "--rsa-key-size", "2048",
+                "--force-renewal",
                 "--manual-auth-hook", "acme-dns-client",
-                "--key-type", "ecdsa",
+                "--cert-name", cert_name,
                 "-d", domain,
             ]
+            for san in sans:
+                cmd += ["-d", san]
             if env == "staging":
                 cmd += ["--server", ACME_STAGING]
             try:
@@ -556,7 +578,7 @@ def register():
                 if result.stderr:
                     output += "\n" + result.stderr
                 if result.returncode == 0:
-                    flash(f"Certificate for {domain} issued successfully.", "success")
+                    flash(f"Certificate for {cert_name} issued successfully.", "success")
                 else:
                     flash(f"Certbot exited with code {result.returncode}.", "error")
             except subprocess.TimeoutExpired:
@@ -566,8 +588,11 @@ def register():
                 output = f"Error running certbot: {e}"
                 flash("Failed to run certbot.", "error")
 
+    cert_name = request.form.get("cert_name", "").strip() if request.method == "POST" else None
+    sans = request.form.get("sans", "").strip() if request.method == "POST" else None
     return render("register.html", "register", "Register Certificate",
-        output=output, domain=domain, env=env, action=action, acme_server=acme_server)
+        output=output, domain=domain, env=env, action=action,
+        acme_server=acme_server, cert_name=cert_name, sans=sans)
 
 # ── routes — IIS mappings ─────────────────────────────────────────────────────
 
