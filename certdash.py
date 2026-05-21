@@ -24,8 +24,8 @@ CERTBOT_LOG_DIR = "/var/log/letsencrypt"
 RENEW_BEFORE_EXPIRY_DAYS = 30
 PORT = 5000
 ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
-TLS_CERT = "/etc/letsencrypt/live/cerbot.bolbolanon.help/fullchain.pem"
-TLS_KEY  = "/etc/letsencrypt/live/cerbot.bolbolanon.help/privkey.pem"
+TLS_CERT = "/etc/letsencrypt/live/certbot.bolbolanon.help/fullchain.pem"
+TLS_KEY  = "/etc/letsencrypt/live/certbot.bolbolanon.help/privkey.pem"
 
 app = Flask(__name__)
 app.secret_key = "certdash-2024"
