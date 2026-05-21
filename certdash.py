@@ -16,7 +16,7 @@ from OpenSSL import crypto
 LIVE_DIR = "/etc/letsencrypt/live"
 IIS_MAP_FILE = "/etc/letsencrypt/iis_cert_map.json"
 PANORAMA_MAP_FILE = "/etc/letsencrypt/panorama_cert_map.json"
-ACMEDNS_CREDENTIALS_FILE = "/etc/letsencrypt/acmedns.json"
+ACMEDNS_CREDENTIALS_FILE = "/etc/acmedns/clientstorage.json"
 EMAIL_CONFIG_FILE = "/etc/letsencrypt/emailserver.json"
 RENEW_BEFORE_EXPIRY_DAYS = 30
 PORT = 5000
@@ -77,7 +77,7 @@ def get_cert_info():
     return certs
 
 def acmedns_register(domain, acme_server):
-    """Call the acme-dns /register API directly and save credentials to acmedns.json."""
+    """Call the acme-dns /register API directly and save credentials to clientstorage.json."""
     url = acme_server.rstrip("/") + "/register"
     req = urllib.request.Request(url, data=b"", method="POST")
     req.add_header("Content-Type", "application/json")
@@ -92,11 +92,11 @@ def acmedns_register(domain, acme_server):
         pass
 
     creds[domain] = {
-        "username": data["username"],
-        "password": data["password"],
         "fulldomain": data["fulldomain"],
         "subdomain": data["subdomain"],
-        "allowfrom": data.get("allowfrom", []),
+        "username": data["username"],
+        "password": data["password"],
+        "server_url": acme_server.rstrip("/"),
     }
     with open(ACMEDNS_CREDENTIALS_FILE, "w") as f:
         json.dump(creds, f, indent=2)
