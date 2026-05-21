@@ -190,7 +190,7 @@ _BASE = """<!DOCTYPE html>
     <img src="/logo.svg" height="26" alt="Theta" style="margin-right:.5rem;vertical-align:middle;display:inline-block">
     <span class="brand">Certbot</span>
     <a href="{{ url_for('dashboard') }}"{% if active=='dashboard' %} class="active"{% endif %}>Dashboard</a>
-    <a href="{{ url_for('register') }}"{% if active=='register' %} class="active"{% endif %}>Register Cert</a>
+    <a href="{{ url_for('register') }}"{% if active=='register' %} class="active"{% endif %}>Register &amp; Deploy</a>
     <a href="{{ url_for('iis_page') }}"{% if active=='iis' %} class="active"{% endif %}>IIS Mappings</a>
     <a href="{{ url_for('panorama_page') }}"{% if active=='panorama' %} class="active"{% endif %}>Panorama Mappings</a>
     <a href="{{ url_for('acmedns_page') }}"{% if active=='acmedns' %} class="active"{% endif %}>ACME DNS Accounts</a>
@@ -260,7 +260,7 @@ _DASHBOARD = """{% extends 'base.html' %}
 
 _REGISTER = """{% extends 'base.html' %}
 {% block content %}
-<h2>Register New Certificate</h2>
+<h2>Register &amp; Deploy</h2>
 
 <div class="card">
   <h3>Step 1 &mdash; Register Domain with ACME DNS</h3>
