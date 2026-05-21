@@ -484,8 +484,8 @@ _ACMEDNS = """{% extends 'base.html' %}
 {% block content %}
 <h2>ACME DNS Accounts</h2>
 <p style="color:#94a3b8;font-size:.875rem;margin-bottom:1.5rem">
-  Stored in {{ storage_file }}. Deleting removes local storage only &mdash;
-  the acme-dns server record remains.
+  Stored in {{ storage_file }}. &ldquo;Delete ACME&rdquo; removes local storage only &mdash;
+  the acme-dns server record remains. &ldquo;Delete Cert&rdquo; runs <code style="font-size:.8rem;color:#94a3b8">certbot delete</code>.
 </p>
 
 <table>
@@ -494,7 +494,8 @@ _ACMEDNS = """{% extends 'base.html' %}
       <th>Domain</th>
       <th>ACME DNS Status</th>
       <th>CNAME Record to Add</th>
-      <th></th>
+      <th>Delete ACME</th>
+      <th>Delete Cert</th>
     </tr>
   </thead>
   <tbody>
@@ -507,7 +508,7 @@ _ACMEDNS = """{% extends 'base.html' %}
       <td>
         <form method="POST" action="{{ url_for('acmedns_delete') }}" style="margin:0">
           <input type="hidden" name="domain" value="{{ row.domain }}">
-          <button class="btn btn-d" onclick="return confirm('Remove {{ row.domain }} from local storage?')">Delete</button>
+          <button class="btn btn-d" onclick="return confirm('Remove {{ row.domain }} from ACME DNS storage?')">Delete</button>
         </form>
       </td>
       {% else %}
@@ -515,9 +516,17 @@ _ACMEDNS = """{% extends 'base.html' %}
       <td style="color:#64748b;font-size:.8rem">&#8212; use Register Cert &rarr; Step 1</td>
       <td></td>
       {% endif %}
+      <td>
+        {% if row.has_cert %}
+        <form method="POST" action="{{ url_for('acmedns_delete_cert') }}" style="margin:0">
+          <input type="hidden" name="domain" value="{{ row.domain }}">
+          <button class="btn btn-d" onclick="return confirm('Run certbot delete for {{ row.domain }}? This removes the certificate files.')">Delete Cert</button>
+        </form>
+        {% endif %}
+      </td>
     </tr>
     {% else %}
-    <tr><td colspan="4" style="text-align:center;color:#64748b;padding:2rem">No domains found</td></tr>
+    <tr><td colspan="5" style="text-align:center;color:#64748b;padding:2rem">No domains found</td></tr>
     {% endfor %}
   </tbody>
 </table>
@@ -768,12 +777,12 @@ def acmedns_page():
         d for d in os.listdir(LIVE_DIR)
         if os.path.isfile(os.path.join(LIVE_DIR, d, "cert.pem"))
     ) if os.path.isdir(LIVE_DIR) else []
-    # Union of certbot domains and ACME DNS accounts; acme-only entries disappear on delete
+    cert_domain_set = set(cert_domains)
     all_domains = sorted(set(cert_domains) | set(accounts.keys()))
     merged = [
-        {"domain": d, "acct": accounts.get(d)}
+        {"domain": d, "acct": accounts.get(d), "has_cert": d in cert_domain_set}
         for d in all_domains
-        if d in cert_domains or d in accounts
+        if d in cert_domain_set or d in accounts
     ]
     return render("acmedns.html", "acmedns", "ACME DNS Accounts",
         merged=merged,
@@ -792,6 +801,28 @@ def acmedns_delete():
             flash(f"Removed {domain} from ACME DNS storage.", "success")
         else:
             flash(f"{domain} not found.", "error")
+    except Exception as e:
+        flash(f"Error: {e}", "error")
+    return redirect(url_for("acmedns_page"))
+
+
+@app.route("/acmedns/delete-cert", methods=["POST"])
+def acmedns_delete_cert():
+    cert_name = request.form.get("domain", "").strip()
+    if not cert_name:
+        flash("No cert name provided.", "error")
+        return redirect(url_for("acmedns_page"))
+    try:
+        result = subprocess.run(
+            ["certbot", "delete", "--cert-name", cert_name, "--non-interactive"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            flash(f"Certificate {cert_name} deleted.", "success")
+        else:
+            flash(f"Certbot delete failed: {(result.stderr or result.stdout).strip()}", "error")
+    except subprocess.TimeoutExpired:
+        flash("Certbot delete timed out.", "error")
     except Exception as e:
         flash(f"Error: {e}", "error")
     return redirect(url_for("acmedns_page"))
