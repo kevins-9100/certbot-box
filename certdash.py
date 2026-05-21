@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import glob
 import json
 import shutil
 import subprocess
@@ -18,6 +19,8 @@ IIS_MAP_FILE = "/etc/letsencrypt/iis_cert_map.json"
 PANORAMA_MAP_FILE = "/etc/letsencrypt/panorama_cert_map.json"
 ACMEDNS_CREDENTIALS_FILE = "/etc/acmedns/clientstorage.json"
 EMAIL_CONFIG_FILE = "/etc/letsencrypt/emailserver.json"
+RECIPIENTS_FILE = "/etc/letsencrypt/recipients.json"
+CERTBOT_LOG_DIR = "/var/log/letsencrypt"
 RENEW_BEFORE_EXPIRY_DAYS = 30
 PORT = 5000
 ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
@@ -140,7 +143,7 @@ _BASE = """<!DOCTYPE html>
     .row{display:flex;gap:.75rem;flex-wrap:wrap;align-items:flex-end;margin-bottom:.75rem}
     .field{display:flex;flex-direction:column;gap:.3rem}
     label{font-size:.75rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em}
-    input[type=text],select{background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:.5rem .75rem;border-radius:.375rem;font-size:.875rem;min-width:160px}
+    input[type=text],input[type=password],select{background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:.5rem .75rem;border-radius:.375rem;font-size:.875rem;min-width:160px}
     input.wide{min-width:280px}
     input:focus,select:focus{outline:none;border-color:#38bdf8}
     .btn{background:#1d4ed8;color:#fff;border:none;padding:.5rem 1rem;border-radius:.375rem;font-size:.875rem;cursor:pointer;font-weight:500}
@@ -167,6 +170,8 @@ _BASE = """<!DOCTYPE html>
     <a href="{{ url_for('iis_page') }}"{% if active=='iis' %} class="active"{% endif %}>IIS Mappings</a>
     <a href="{{ url_for('panorama_page') }}"{% if active=='panorama' %} class="active"{% endif %}>Panorama Mappings</a>
     <a href="{{ url_for('acmedns_page') }}"{% if active=='acmedns' %} class="active"{% endif %}>ACME DNS Accounts</a>
+    <a href="{{ url_for('logs_page') }}"{% if active=='logs' %} class="active"{% endif %}>Logs</a>
+    <a href="{{ url_for('email_page') }}"{% if active=='email' %} class="active"{% endif %}>Email Settings</a>
   </nav>
   <div class="page">
     {% for cat, msg in messages %}
@@ -493,6 +498,7 @@ _ACMEDNS = """{% extends 'base.html' %}
     <tr>
       <th>Domain</th>
       <th>ACME DNS Status</th>
+      <th>Issued</th>
       <th>CNAME Record to Add</th>
       <th>Delete ACME</th>
       <th>Delete Cert</th>
@@ -504,6 +510,7 @@ _ACMEDNS = """{% extends 'base.html' %}
       <td class="mono">{{ row.domain }}</td>
       {% if row.acct %}
       <td><span class="badge ok">Registered</span></td>
+      <td>{{ row.issued or '&mdash;' }}</td>
       <td class="mono" style="font-size:.8rem">_acme-challenge.{{ row.domain }}&nbsp;&rarr;&nbsp;{{ row.acct.fulldomain }}.</td>
       <td>
         <form method="POST" action="{{ url_for('acmedns_delete') }}" style="margin:0">
@@ -513,6 +520,7 @@ _ACMEDNS = """{% extends 'base.html' %}
       </td>
       {% else %}
       <td><span class="badge critical">Not registered</span></td>
+      <td>{{ row.issued or '&mdash;' }}</td>
       <td style="color:#64748b;font-size:.8rem">&#8212; use Register Cert &rarr; Step 1</td>
       <td></td>
       {% endif %}
@@ -526,10 +534,131 @@ _ACMEDNS = """{% extends 'base.html' %}
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="5" style="text-align:center;color:#64748b;padding:2rem">No domains found</td></tr>
+    <tr><td colspan="6" style="text-align:center;color:#64748b;padding:2rem">No domains found</td></tr>
     {% endfor %}
   </tbody>
 </table>
+{% endblock %}"""
+
+_LOGS = """{% extends 'base.html' %}
+{% block content %}
+<h2>Certbot Logs</h2>
+<div class="card" style="margin-bottom:1rem">
+  <form method="GET" style="display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap">
+    <div class="field">
+      <label>Log File</label>
+      <select name="file" onchange="this.form.submit()">
+        {% for f in log_files %}
+        <option value="{{ f }}"{% if f == selected_file %} selected{% endif %}>{{ f }}</option>
+        {% else %}
+        <option>(no log files found)</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>Lines</label>
+      <select name="lines" onchange="this.form.submit()">
+        {% for n in [200, 500, 1000] %}
+        <option value="{{ n }}"{% if n == selected_lines %} selected{% endif %}>Last {{ n }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field" style="justify-content:flex-end">
+      <button type="submit" class="btn-s">Refresh</button>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:1rem;align-items:center;font-size:.75rem;color:#64748b;padding-bottom:.5rem">
+      <span><span style="color:#94a3b8">&#9632;</span> INFO</span>
+      <span><span style="color:#facc15">&#9632;</span> WARNING</span>
+      <span><span style="color:#f87171">&#9632;</span> ERROR</span>
+      <span><span style="color:#4b5563">&#9632;</span> DEBUG</span>
+    </div>
+  </form>
+</div>
+<div class="output" style="max-height:680px;font-size:.75rem">{% if log_lines %}{% for line in log_lines %}<span style="color:{{ line.color }}">{{ line.text }}</span>
+{% endfor %}{% else %}<span style="color:#64748b">No log entries found in {{ selected_file }}.</span>{% endif %}</div>
+{% endblock %}"""
+
+_EMAIL = """{% extends 'base.html' %}
+{% block content %}
+<h2>Email Settings</h2>
+
+<div class="card">
+  <h3>SMTP Configuration</h3>
+  <form method="POST" action="{{ url_for('email_update_settings') }}">
+    <div class="row">
+      <div class="field">
+        <label>Sender Email</label>
+        <input type="text" name="sender_email" value="{{ settings.get('SENDER_EMAIL', '') }}" class="wide">
+      </div>
+      <div class="field">
+        <label>SMTP Host</label>
+        <input type="text" name="smtp_host" value="{{ settings.get('SMTP_HOST', '') }}" class="wide">
+      </div>
+      <div class="field">
+        <label>Port</label>
+        <input type="text" name="smtp_port" value="{{ settings.get('SMTP_PORT', 587) }}" style="min-width:80px">
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>SMTP Username</label>
+        <input type="text" name="smtp_user" value="{{ settings.get('SMTP_USER', '') }}" class="wide">
+      </div>
+      <div class="field">
+        <label>SMTP Password</label>
+        <input type="password" name="smtp_pass" placeholder="(leave blank to keep current)" class="wide">
+      </div>
+      <div class="field">
+        <label>TLS</label>
+        <select name="smtp_tls">
+          <option value="1"{% if settings.get('SMTP_TLS', True) %} selected{% endif %}>Enabled</option>
+          <option value="0"{% if not settings.get('SMTP_TLS', True) %} selected{% endif %}>Disabled</option>
+        </select>
+      </div>
+      <div class="field" style="justify-content:flex-end">
+        <button class="btn">Save Settings</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Notification Recipients</h3>
+  {% if recipients %}
+  <table>
+    <thead>
+      <tr><th>Email Address</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for r in recipients %}
+      <tr>
+        <td class="mono">{{ r }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('email_delete_recipient') }}" style="margin:0">
+            <input type="hidden" name="email" value="{{ r }}">
+            <button class="btn btn-d" onclick="return confirm('Remove {{ r }} from recipients?')">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#64748b;font-size:.875rem;margin-bottom:1.25rem">No recipients configured.</p>
+  {% endif %}
+  <h3 style="margin-top:.5rem">Add Recipient</h3>
+  <form method="POST" action="{{ url_for('email_add_recipient') }}">
+    <div class="row">
+      <div class="field">
+        <label>Email Address</label>
+        <input type="text" name="email" placeholder="user@example.com" class="wide">
+      </div>
+      <div class="field" style="justify-content:flex-end">
+        <button class="btn">Add</button>
+      </div>
+    </div>
+  </form>
+</div>
 {% endblock %}"""
 
 # ── jinja2 environment ────────────────────────────────────────────────────────
@@ -542,6 +671,8 @@ _jinja = Environment(
         "iis.html": _IIS,
         "panorama.html": _PANORAMA,
         "acmedns.html": _ACMEDNS,
+        "logs.html": _LOGS,
+        "email.html": _EMAIL,
     }),
     autoescape=True,
 )
@@ -778,9 +909,25 @@ def acmedns_page():
         if os.path.isfile(os.path.join(LIVE_DIR, d, "cert.pem"))
     ) if os.path.isdir(LIVE_DIR) else []
     cert_domain_set = set(cert_domains)
+
+    def cert_issued(domain):
+        cert_path = os.path.join(LIVE_DIR, domain, "cert.pem")
+        try:
+            with open(cert_path, "rb") as f:
+                cert = crypto.load_certificate(crypto.FILETYPE_PEM, f.read())
+            raw = cert.get_notBefore().decode("ascii")
+            return datetime.strptime(raw, "%Y%m%d%H%M%SZ").strftime("%Y-%m-%d")
+        except Exception:
+            return None
+
     all_domains = sorted(set(cert_domains) | set(accounts.keys()))
     merged = [
-        {"domain": d, "acct": accounts.get(d), "has_cert": d in cert_domain_set}
+        {
+            "domain": d,
+            "acct": accounts.get(d),
+            "has_cert": d in cert_domain_set,
+            "issued": cert_issued(d) if d in cert_domain_set else None,
+        }
         for d in all_domains
         if d in cert_domain_set or d in accounts
     ]
@@ -826,6 +973,128 @@ def acmedns_delete_cert():
     except Exception as e:
         flash(f"Error: {e}", "error")
     return redirect(url_for("acmedns_page"))
+
+
+# ── routes — logs ────────────────────────────────────────────────────────────
+
+@app.route("/logs")
+def logs_page():
+    raw_files = sorted(
+        glob.glob(os.path.join(CERTBOT_LOG_DIR, "letsencrypt.log*")),
+        key=lambda p: (os.path.basename(p) != "letsencrypt.log", p),
+    )
+    log_files = [os.path.basename(p) for p in raw_files]
+    selected_file = request.args.get("file", log_files[0] if log_files else "letsencrypt.log")
+    selected_file = os.path.basename(selected_file)  # strip any path traversal
+    try:
+        selected_lines = max(1, min(1000, int(request.args.get("lines", 200))))
+    except ValueError:
+        selected_lines = 200
+
+    log_path = os.path.join(CERTBOT_LOG_DIR, selected_file)
+    log_lines = []
+    try:
+        with open(log_path, "r", errors="replace") as f:
+            raw = f.readlines()
+        for text in raw[-selected_lines:]:
+            text = text.rstrip()
+            if ":DEBUG:" in text:
+                color = "#4b5563"
+            elif ":WARNING:" in text:
+                color = "#facc15"
+            elif ":ERROR:" in text or ":CRITICAL:" in text:
+                color = "#f87171"
+            else:
+                color = "#94a3b8"
+            log_lines.append({"text": text, "color": color})
+    except (FileNotFoundError, PermissionError):
+        pass
+
+    return render("logs.html", "logs", "Logs",
+        log_files=log_files,
+        selected_file=selected_file,
+        selected_lines=selected_lines,
+        log_lines=log_lines,
+    )
+
+
+# ── routes — email settings ───────────────────────────────────────────────────
+
+@app.route("/email")
+def email_page():
+    try:
+        settings = load_json(EMAIL_CONFIG_FILE)
+    except (FileNotFoundError, json.JSONDecodeError):
+        settings = {}
+    try:
+        recipients = load_json(RECIPIENTS_FILE)
+        if not isinstance(recipients, list):
+            recipients = []
+    except (FileNotFoundError, json.JSONDecodeError):
+        recipients = []
+    return render("email.html", "email", "Email Settings",
+        settings=settings, recipients=recipients)
+
+
+@app.route("/email/settings", methods=["POST"])
+def email_update_settings():
+    try:
+        settings = load_json(EMAIL_CONFIG_FILE)
+    except (FileNotFoundError, json.JSONDecodeError):
+        settings = {}
+    settings["SENDER_EMAIL"] = request.form.get("sender_email", "").strip()
+    settings["SMTP_HOST"] = request.form.get("smtp_host", "").strip()
+    try:
+        settings["SMTP_PORT"] = int(request.form.get("smtp_port", 587) or 587)
+    except ValueError:
+        settings["SMTP_PORT"] = 587
+    smtp_pass = request.form.get("smtp_pass", "").strip()
+    if smtp_pass:
+        settings["SMTP_PASS"] = smtp_pass
+    settings["SMTP_USER"] = request.form.get("smtp_user", "").strip()
+    settings["SMTP_TLS"] = request.form.get("smtp_tls") == "1"
+    save_json(EMAIL_CONFIG_FILE, settings)
+    flash("Email settings saved.", "success")
+    return redirect(url_for("email_page"))
+
+
+@app.route("/email/add-recipient", methods=["POST"])
+def email_add_recipient():
+    email = request.form.get("email", "").strip()
+    if not email:
+        flash("Email address is required.", "error")
+        return redirect(url_for("email_page"))
+    try:
+        recipients = load_json(RECIPIENTS_FILE)
+        if not isinstance(recipients, list):
+            recipients = []
+    except (FileNotFoundError, json.JSONDecodeError):
+        recipients = []
+    if email in recipients:
+        flash(f"{email} is already in the list.", "error")
+    else:
+        recipients.append(email)
+        save_json(RECIPIENTS_FILE, recipients)
+        flash(f"Added {email}.", "success")
+    return redirect(url_for("email_page"))
+
+
+@app.route("/email/delete-recipient", methods=["POST"])
+def email_delete_recipient():
+    email = request.form.get("email", "").strip()
+    try:
+        recipients = load_json(RECIPIENTS_FILE)
+        if not isinstance(recipients, list):
+            recipients = []
+    except (FileNotFoundError, json.JSONDecodeError):
+        recipients = []
+    if email in recipients:
+        recipients.remove(email)
+        save_json(RECIPIENTS_FILE, recipients)
+        flash(f"Removed {email}.", "success")
+    else:
+        flash(f"{email} not found.", "error")
+    return redirect(url_for("email_page"))
 
 
 # ── logo ──────────────────────────────────────────────────────────────────────
