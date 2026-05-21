@@ -24,8 +24,9 @@ CERTBOT_LOG_DIR = "/var/log/letsencrypt"
 RENEW_BEFORE_EXPIRY_DAYS = 30
 PORT = 5000
 ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
-TLS_CERT = "/etc/letsencrypt/live/certbot.bolbolanon.help/fullchain.pem"
-TLS_KEY  = "/etc/letsencrypt/live/certbot.bolbolanon.help/privkey.pem"
+TLS_CERT    = "/etc/letsencrypt/live/certbot.bolbolanon.help/fullchain.pem"
+TLS_KEY     = "/etc/letsencrypt/live/certbot.bolbolanon.help/privkey.pem"
+DEPLOY_HOOK = "/etc/letsencrypt/renewal-hooks/deploy/run_deploy_hook.sh"
 
 app = Flask(__name__)
 app.secret_key = "certdash-2024"
@@ -80,6 +81,27 @@ def get_cert_info():
         except Exception as e:
             certs.append({"name": cert_name, "error": str(e), "status": "error"})
     return certs
+
+def get_cert_domains(cert_name):
+    """Return space-separated domain list for a cert (CN + SANs)."""
+    cert_path = os.path.join(LIVE_DIR, cert_name, "cert.pem")
+    try:
+        with open(cert_path, "rb") as f:
+            cert = crypto.load_certificate(crypto.FILETYPE_PEM, f.read())
+        domains = set()
+        cn = cert.get_subject().CN
+        if cn:
+            domains.add(cn)
+        for i in range(cert.get_extension_count()):
+            ext = cert.get_extension(i)
+            if ext.get_short_name() == b"subjectAltName":
+                for san in str(ext).split(","):
+                    san = san.strip()
+                    if san.startswith("DNS:"):
+                        domains.add(san[4:])
+        return " ".join(sorted(domains))
+    except Exception:
+        return cert_name
 
 def acmedns_register(domain, acme_server):
     """Call the acme-dns /register API directly and save credentials to clientstorage.json."""
@@ -315,6 +337,38 @@ _REGISTER = """{% extends 'base.html' %}
   {% if action == 'issue-cert' and output is not none %}
   <hr>
   <h3>Certbot Output</h3>
+  <div class="output">{{ output }}</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>Manual Deployment</h3>
+  <p class="hint" style="margin-bottom:1rem">
+    Triggers <code style="font-size:.8rem;color:#94a3b8">renewal-hooks/deploy/run_deploy_hook.sh</code>
+    for an existing certificate, exactly as certbot would after a renewal.
+  </p>
+  <form method="POST" onsubmit="lock(this,'Deploying…')">
+    <input type="hidden" name="action" value="deploy-cert">
+    <div class="row">
+      <div class="field">
+        <label>Certificate</label>
+        <select name="deploy_cert_name" class="wide">
+          {% for cn in cert_names %}
+          <option value="{{ cn }}"{% if cn == deploy_cert_name %} selected{% endif %}>{{ cn }}</option>
+          {% else %}
+          <option>(no certificates found)</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field" style="justify-content:flex-end">
+        <button type="submit" class="btn">Trigger Deployment</button>
+        <p class="hint">May take up to 2 minutes</p>
+      </div>
+    </div>
+  </form>
+  {% if action == 'deploy-cert' and output is not none %}
+  <hr>
+  <h3>Deployment Output</h3>
   <div class="output">{{ output }}</div>
   {% endif %}
 </div>
@@ -711,6 +765,7 @@ def register():
     env = "production"
     action = None
     acme_server = "http://localhost:8080"
+    deploy_cert_name = None
 
     if request.method == "POST":
         action = request.form.get("action", "issue-cert")
@@ -718,7 +773,37 @@ def register():
         env = request.form.get("env", "production")
         acme_server = request.form.get("acme_server", "http://localhost:8080").strip()
 
-        if not domain:
+        if action == "deploy-cert":
+            deploy_cert_name = request.form.get("deploy_cert_name", "").strip()
+            if not deploy_cert_name:
+                flash("Please select a certificate.", "error")
+            elif not os.path.isfile(DEPLOY_HOOK):
+                flash(f"Deploy hook not found at {DEPLOY_HOOK}.", "error")
+            else:
+                lineage = os.path.join(LIVE_DIR, deploy_cert_name)
+                domains = get_cert_domains(deploy_cert_name)
+                run_env = os.environ.copy()
+                run_env["RENEWED_LINEAGE"] = lineage
+                run_env["RENEWED_DOMAINS"] = domains
+                try:
+                    result = subprocess.run(
+                        ["bash", DEPLOY_HOOK],
+                        capture_output=True, text=True, timeout=120, env=run_env,
+                    )
+                    output = result.stdout
+                    if result.stderr:
+                        output += "\n" + result.stderr
+                    if result.returncode == 0:
+                        flash(f"Deployment for {deploy_cert_name} succeeded.", "success")
+                    else:
+                        flash(f"Deployment failed (exit {result.returncode}).", "error")
+                except subprocess.TimeoutExpired:
+                    output = "Error: deployment timed out after 120 seconds."
+                    flash("Deployment timed out.", "error")
+                except Exception as e:
+                    output = f"Error: {e}"
+                    flash("Failed to run deployment.", "error")
+        elif not domain:
             flash("Domain is required.", "error")
         elif action == "register-acme":
             try:
@@ -752,6 +837,7 @@ def register():
                 "--key-type", "rsa",
                 "--rsa-key-size", "2048",
                 "--force-renewal",
+                "--no-directory-hooks",
                 "--manual-auth-hook", "acme-dns-client",
                 "--cert-name", cert_name,
                 "-d", domain,
@@ -778,9 +864,14 @@ def register():
 
     cert_name = request.form.get("cert_name", "").strip() if request.method == "POST" else None
     sans = request.form.get("sans", "").strip() if request.method == "POST" else None
+    cert_names = sorted(
+        d for d in os.listdir(LIVE_DIR)
+        if os.path.isfile(os.path.join(LIVE_DIR, d, "cert.pem"))
+    ) if os.path.isdir(LIVE_DIR) else []
     return render("register.html", "register", "Register Certificate",
         output=output, domain=domain, env=env, action=action,
-        acme_server=acme_server, cert_name=cert_name, sans=sans)
+        acme_server=acme_server, cert_name=cert_name, sans=sans,
+        cert_names=cert_names, deploy_cert_name=deploy_cert_name)
 
 # ── routes — IIS mappings ─────────────────────────────────────────────────────
 
