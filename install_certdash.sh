@@ -25,5 +25,5 @@ systemctl restart certdash
 
 SERVER_IP=$(hostname -I | awk '{print $1}')
 echo ""
-echo "Done. Dashboard available at: http://${SERVER_IP}:5000"
+echo "Done. Dashboard available at: https://${SERVER_IP}:5000"
 echo "Logs: journalctl -u certdash -f"

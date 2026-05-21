@@ -24,6 +24,8 @@ CERTBOT_LOG_DIR = "/var/log/letsencrypt"
 RENEW_BEFORE_EXPIRY_DAYS = 30
 PORT = 5000
 ACME_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
+TLS_CERT = "/etc/letsencrypt/live/cerbot.bolbolanon.help/fullchain.pem"
+TLS_KEY  = "/etc/letsencrypt/live/cerbot.bolbolanon.help/privkey.pem"
 
 app = Flask(__name__)
 app.secret_key = "certdash-2024"
@@ -1109,4 +1111,8 @@ def serve_logo():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT)
+    if os.path.isfile(TLS_CERT) and os.path.isfile(TLS_KEY):
+        app.run(host="0.0.0.0", port=PORT, ssl_context=(TLS_CERT, TLS_KEY))
+    else:
+        print(f"WARNING: TLS cert not found at {TLS_CERT}, starting without HTTPS")
+        app.run(host="0.0.0.0", port=PORT)
